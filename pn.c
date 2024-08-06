@@ -12,8 +12,8 @@
 #define DECODER_PORT 5004          // Port of the Decoder
 #define BUFFER_SIZE 65535          // Max size of a single UDP packet
 #define MAX_PACKETS 100000         // Maximum number of packets to buffer
-#define START_BUFFERING_TIME 1500  // 3 seconds for normal operation
-#define BUFFERING_DURATION 500      // 0.5 seconds for buffering
+#define START_BUFFERING_TIME 2000  // 3 seconds for normal operation
+#define MAX_BUFFERED_PACKETS 2000  // Maximum number of packets to buffer before sending
 
 typedef struct {
     char *data;
@@ -29,6 +29,7 @@ int main() {
     int buffering = 0;
     int result;
     clock_t startTime = clock();  // Track the start time for the initial normal operation
+    clock_t bufferingStartTime, bufferingEndTime; // Variables for buffering time measurement
 
     // Initialize Winsock
     result = WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -101,7 +102,7 @@ int main() {
                 printf("Starting buffering period\n");
                 buffering = 1;  // Switch to buffering mode
                 bufferIndex = 0; // Reset buffer index
-                startTime = clock(); // Reset start time for buffering duration
+                bufferingStartTime = clock(); // Record start time for buffering
             }
         } else {
             // Buffer the incoming packets
@@ -118,25 +119,23 @@ int main() {
                 printf("Buffer overflow, discarding packet\n");
             }
 
-            // Check if buffering duration is over
-            if (clock() - startTime >= BUFFERING_DURATION * CLOCKS_PER_SEC / 1000) {
-                // Measure the time taken to do buffering
-                clock_t endBufferingTime = clock();
-                double bufferingDuration = (double)(endBufferingTime - startTime) / CLOCKS_PER_SEC;
-                printf("Buffer Times: %.2f ms\n", bufferingDuration  * 1000);
+            // Check if the buffer has reached the specified number of packets
+            if (bufferIndex >= MAX_BUFFERED_PACKETS) {
+                printf("Buffered %d packets, sending now\n", bufferIndex);
 
-                printf("Sending buffered packets\n");
-
-                    // Calculate the total size of the buffered packets
+                // Calculate the total size of the buffered packets
                 int totalBufferSize = 0;
                 for (int i = 0; i < bufferIndex; i++) {
                     totalBufferSize += packetBuffer[i].size;
                 }
-                printf("Size: %d bytes\n", totalBufferSize);    
-                 printf("Number: %d packaets\n", bufferIndex);
+                printf("Total size: %d bytes\n", totalBufferSize);
+
+                bufferingEndTime = clock(); // Record end time for buffering
+                double bufferingDuration = (double)(bufferingEndTime - bufferingStartTime) / CLOCKS_PER_SEC;
+                printf("Time taken to buffer packets: %.2f ms\n", bufferingDuration * 1000);
 
                 clock_t sendStartTime = clock();
-                
+
                 // Send buffered packets
                 for (int i = 0; i < bufferIndex; i++) {
                     result = sendto(senderSocket, packetBuffer[i].data, packetBuffer[i].size, 0, (struct sockaddr *)&decoderAddr, sizeof(decoderAddr));
@@ -149,7 +148,7 @@ int main() {
                 // Measure the time taken to send buffered packets
                 clock_t sendEndTime = clock();
                 double sendDuration = (double)(sendEndTime - sendStartTime) / CLOCKS_PER_SEC;
-                printf("Time send buffered packets: %.2f ms\n", sendDuration * 1000);
+                printf("Time taken to send buffered packets: %.2f ms\n", sendDuration * 1000);
 
                 // Clear the buffer
                 bufferIndex = 0;

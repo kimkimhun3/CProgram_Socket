@@ -12,8 +12,9 @@
 #define DECODER_PORT 5004          // Port of the Decoder
 #define BUFFER_SIZE 65535          // Max size of a single UDP packet
 #define MAX_PACKETS 100000         // Maximum number of packets to buffer
-#define START_BUFFERING_TIME 1500  // 3 seconds for normal operation
-#define BUFFERING_DURATION 500      // 0.5 seconds for buffering
+#define START_BUFFERING_TIME 2000  // 2 seconds for normal operation
+#define BUFFERING_DURATION 1000    // 1 second for buffering
+#define SEND_DELAY 2000            // 2 seconds delay before sending buffered packets
 
 typedef struct {
     char *data;
@@ -27,8 +28,10 @@ int main() {
     Packet packetBuffer[MAX_PACKETS];
     int bufferIndex = 0;
     int buffering = 0;
+    int sendDelay = 0;
     int result;
     clock_t startTime = clock();  // Track the start time for the initial normal operation
+    clock_t sendDelayStartTime = 0;
 
     // Initialize Winsock
     result = WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -89,7 +92,7 @@ int main() {
             continue;
         }
 
-        if (!buffering) {
+        if (!buffering && !sendDelay) {
             // Forward packets directly to the decoder during normal operation
             result = sendto(senderSocket, buffer, recvLen, 0, (struct sockaddr *)&decoderAddr, sizeof(decoderAddr));
             if (result == SOCKET_ERROR) {
@@ -103,7 +106,7 @@ int main() {
                 bufferIndex = 0; // Reset buffer index
                 startTime = clock(); // Reset start time for buffering duration
             }
-        } else {
+        } else if (buffering) {
             // Buffer the incoming packets
             if (bufferIndex < MAX_PACKETS) {
                 packetBuffer[bufferIndex].data = malloc(recvLen);
@@ -125,15 +128,31 @@ int main() {
                 double bufferingDuration = (double)(endBufferingTime - startTime) / CLOCKS_PER_SEC;
                 printf("Buffer Times: %.2f ms\n", bufferingDuration  * 1000);
 
+                printf("Waiting for 2 seconds before sending buffered packets\n");
+
+                // Start the send delay period
+                sendDelay = 1;
+                sendDelayStartTime = clock();
+                buffering = 0;
+            }
+        } else if (sendDelay) {
+            // Continue normal operation during send delay
+            result = sendto(senderSocket, buffer, recvLen, 0, (struct sockaddr *)&decoderAddr, sizeof(decoderAddr));
+            if (result == SOCKET_ERROR) {
+                printf("sendto() failed: %d\n", WSAGetLastError());
+            }
+
+            // Check if the send delay period is over
+            if (clock() - sendDelayStartTime >= SEND_DELAY * CLOCKS_PER_SEC / 1000) {
                 printf("Sending buffered packets\n");
 
-                    // Calculate the total size of the buffered packets
+                // Calculate the total size of the buffered packets
                 int totalBufferSize = 0;
                 for (int i = 0; i < bufferIndex; i++) {
                     totalBufferSize += packetBuffer[i].size;
                 }
                 printf("Size: %d bytes\n", totalBufferSize);    
-                 printf("Number: %d packaets\n", bufferIndex);
+                printf("Number: %d packets\n", bufferIndex);
 
                 clock_t sendStartTime = clock();
                 
@@ -149,13 +168,13 @@ int main() {
                 // Measure the time taken to send buffered packets
                 clock_t sendEndTime = clock();
                 double sendDuration = (double)(sendEndTime - sendStartTime) / CLOCKS_PER_SEC;
-                printf("Time send buffered packets: %.2f ms\n", sendDuration * 1000);
+                printf("Time to send buffered packets: %.2f ms\n", sendDuration * 1000);
 
                 // Clear the buffer
                 bufferIndex = 0;
 
-                // Switch back to normal operation
-                buffering = 0;
+                // End the send delay period
+                sendDelay = 0;
                 startTime = clock();  // Reset start time for the next normal operation period
                 printf("---------------------------------------------\n");
             }

@@ -7,20 +7,26 @@
 
 #pragma comment(lib, "ws2_32.lib")
 
-#define RECEIVER_PORT 5004         // Port where we will receive packets
-#define DECODER_IP "192.168.25.89" // IP of the Decoder
-#define DECODER_PORT 5004          // Port of the Decoder
-#define BUFFER_SIZE 65535          // Max size of a single UDP packet
-#define MAX_PACKETS 100000         // Maximum number of packets to buffer
-#define START_BUFFERING_TIME 1500  // 3 seconds for normal operation
-#define BUFFERING_DURATION 500      // 0.5 seconds for buffering
-
+#define BUFFER_SIZE 65535  // Max size of a single UDP packet
+#define MAX_PACKETS 100000 // Maximum number of packets to buffer
+//irekaishitari
 typedef struct {
     char *data;
     int size;
 } Packet;
 
-int main() {
+int main(int argc, char *argv[]) {
+    if (argc != 6) {
+        printf("Usage: %s <RECEIVER_PORT> <DECODER_IP> <DECODER_PORT> <START_BUFFERING_TIME> <BUFFERING_DURATION>\n", argv[0]);
+        return 1;
+    }
+
+    int RECEIVER_PORT = atoi(argv[1]);
+    char *DECODER_IP = argv[2];
+    int DECODER_PORT = atoi(argv[3]);
+    int START_BUFFERING_TIME = atoi(argv[4]);
+    int BUFFERING_DURATION = atoi(argv[5]);
+
     WSADATA wsaData;
     SOCKET receiverSocket, senderSocket;
     struct sockaddr_in receiverAddr, decoderAddr;
@@ -28,7 +34,7 @@ int main() {
     int bufferIndex = 0;
     int buffering = 0;
     int result;
-    clock_t startTime = clock();  // Track the start time for the initial normal operation
+    clock_t startTime = clock(); // Track the start time for the initial normal operation
 
     // Initialize Winsock
     result = WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -123,20 +129,20 @@ int main() {
                 // Measure the time taken to do buffering
                 clock_t endBufferingTime = clock();
                 double bufferingDuration = (double)(endBufferingTime - startTime) / CLOCKS_PER_SEC;
-                printf("Buffer Times: %.2f ms\n", bufferingDuration  * 1000);
+                printf("Buffer Times: %.2f ms\n", bufferingDuration * 1000);
 
                 printf("Sending buffered packets\n");
 
-                    // Calculate the total size of the buffered packets
+                // Calculate the total size of the buffered packets
                 int totalBufferSize = 0;
                 for (int i = 0; i < bufferIndex; i++) {
                     totalBufferSize += packetBuffer[i].size;
                 }
-                printf("Size: %d bytes\n", totalBufferSize);    
-                 printf("Number: %d packaets\n", bufferIndex);
+                printf("Size: %d bytes\n", totalBufferSize);
+                printf("Number: %d packets\n", bufferIndex);
 
                 clock_t sendStartTime = clock();
-                
+
                 // Send buffered packets
                 for (int i = 0; i < bufferIndex; i++) {
                     result = sendto(senderSocket, packetBuffer[i].data, packetBuffer[i].size, 0, (struct sockaddr *)&decoderAddr, sizeof(decoderAddr));
@@ -156,7 +162,7 @@ int main() {
 
                 // Switch back to normal operation
                 buffering = 0;
-                startTime = clock();  // Reset start time for the next normal operation period
+                startTime = clock(); // Reset start time for the next normal operation period
                 printf("---------------------------------------------\n");
             }
         }

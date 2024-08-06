@@ -12,28 +12,40 @@
 #define DECODER_PORT 5004          // Port of the Decoder
 #define BUFFER_SIZE 65535          // Max size of a single UDP packet
 #define MAX_PACKETS 100000         // Maximum number of packets to buffer
-#define START_BUFFERING_TIME 1500  // 3 seconds for normal operation
-#define BUFFERING_DURATION 500      // 0.5 seconds for buffering
+#define START_BUFFERING_TIME 4000  // 5 seconds for normal operation
+#define BUFFERING_DURATION 1000     // 0.5 seconds for buffering
 
 typedef struct {
     char *data;
     int size;
 } Packet;
 
+void cleanup(Packet *packetBuffer, int bufferIndex) {
+    for (int i = 0; i < bufferIndex; i++) {
+        free(packetBuffer[i].data);
+    }
+    free(packetBuffer);
+}
+
 int main() {
     WSADATA wsaData;
     SOCKET receiverSocket, senderSocket;
     struct sockaddr_in receiverAddr, decoderAddr;
-    Packet packetBuffer[MAX_PACKETS];
+    Packet *packetBuffer = (Packet *)malloc(MAX_PACKETS * sizeof(Packet));
+    if (packetBuffer == NULL) {
+        printf("Failed to allocate memory for packet buffer\n");
+        return 1;
+    }
     int bufferIndex = 0;
     int buffering = 0;
     int result;
-    clock_t startTime = clock();  // Track the start time for the initial normal operation
+    clock_t startTime = clock();  // Track the start time for the initial normal operation// track the operation of them and they still the same
 
     // Initialize Winsock
     result = WSAStartup(MAKEWORD(2, 2), &wsaData);
     if (result != 0) {
         printf("WSAStartup failed: %d\n", result);
+        free(packetBuffer);
         return 1;
     }
 
@@ -41,6 +53,7 @@ int main() {
     receiverSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (receiverSocket == INVALID_SOCKET) {
         printf("socket() failed: %d\n", WSAGetLastError());
+        cleanup(packetBuffer, bufferIndex);
         WSACleanup();
         return 1;
     }
@@ -56,6 +69,7 @@ int main() {
     if (result == SOCKET_ERROR) {
         printf("bind() failed: %d\n", WSAGetLastError());
         closesocket(receiverSocket);
+        cleanup(packetBuffer, bufferIndex);
         WSACleanup();
         return 1;
     }
@@ -65,6 +79,7 @@ int main() {
     if (senderSocket == INVALID_SOCKET) {
         printf("socket() failed: %d\n", WSAGetLastError());
         closesocket(receiverSocket);
+        cleanup(packetBuffer, bufferIndex);
         WSACleanup();
         return 1;
     }
@@ -123,20 +138,20 @@ int main() {
                 // Measure the time taken to do buffering
                 clock_t endBufferingTime = clock();
                 double bufferingDuration = (double)(endBufferingTime - startTime) / CLOCKS_PER_SEC;
-                printf("Buffer Times: %.2f ms\n", bufferingDuration  * 1000);
+                printf("Buffer Times: %.2f ms\n", bufferingDuration * 1000);
 
                 printf("Sending buffered packets\n");
 
-                    // Calculate the total size of the buffered packets
+                // Calculate the total size of the buffered packets
                 int totalBufferSize = 0;
                 for (int i = 0; i < bufferIndex; i++) {
                     totalBufferSize += packetBuffer[i].size;
                 }
-                printf("Size: %d bytes\n", totalBufferSize);    
-                 printf("Number: %d packaets\n", bufferIndex);
+                printf("Size: %d bytes\n", totalBufferSize);
+                printf("Number: %d packets\n", bufferIndex);
 
                 clock_t sendStartTime = clock();
-                
+
                 // Send buffered packets
                 for (int i = 0; i < bufferIndex; i++) {
                     result = sendto(senderSocket, packetBuffer[i].data, packetBuffer[i].size, 0, (struct sockaddr *)&decoderAddr, sizeof(decoderAddr));
@@ -165,6 +180,7 @@ int main() {
     // Cleanup
     closesocket(receiverSocket);
     closesocket(senderSocket);
+    cleanup(packetBuffer, bufferIndex);
     WSACleanup();
     return 0;
 }

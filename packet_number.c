@@ -13,8 +13,8 @@
 #define BUFFER_SIZE 65535          // Max size of a single UDP packet
 #define MAX_PACKETS 100000         // Maximum number of packets to buffer
 #define START_BUFFERING_TIME 2000  // 3 seconds for normal operation
-#define MAX_BUFFERED_PACKETS 1000   // Maximum number of packets to buffer before sending
-
+#define MAX_BUFFERED_PACKETS 2000   // Maximum number of packets to buffer before sending
+//gcc packet_time.c -o packet_time.exe -lws2_32
 typedef struct {
     char *data;
     int size;
