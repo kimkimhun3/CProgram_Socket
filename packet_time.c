@@ -12,7 +12,7 @@
 #define DECODER_PORT 5004          // Port of the Decoder
 #define BUFFER_SIZE 65535          // Max size of a single UDP packet
 #define MAX_PACKETS 100000         // Maximum number of packets to buffer
-#define START_BUFFERING_TIME 1500  // 3 seconds for normal operation
+#define START_BUFFERING_TIME 2000  // 3 seconds for normal operation
 #define BUFFERING_DURATION 500      // 0.5 seconds for buffering
 
 typedef struct {

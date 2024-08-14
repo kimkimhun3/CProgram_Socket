@@ -1,8 +1,8 @@
+#include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <winsock2.h>
-#include <windows.h>
 #include <time.h>
 
 #pragma comment(lib, "ws2_32.lib")
@@ -14,32 +14,125 @@
 #define MAX_PACKETS 100000         // Maximum number of packets to buffer
 #define START_BUFFERING_TIME 2000  // 3 seconds for normal operation
 #define MAX_BUFFERED_PACKETS 1000  // Maximum number of packets to buffer before sending
-#define MAX_RETRY_ATTEMPTS 5       // Maximum number of retry attempts for sending a packet
 
 typedef struct {
     char *data;
     int size;
 } Packet;
 
-int sendPacketWithRetry(SOCKET senderSocket, const struct sockaddr_in *decoderAddr, Packet packet) {
-    int result;
-    int attempts = 0;
+// Function prototypes
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+DWORD WINAPI BufferingThread(LPVOID lpParam);
 
-    while (attempts < MAX_RETRY_ATTEMPTS) {
-        result = sendto(senderSocket, packet.data, packet.size, 0, (struct sockaddr *)decoderAddr, sizeof(*decoderAddr));
-        if (result == SOCKET_ERROR) {
-            printf("sendto() failed: %d. Retrying... (Attempt %d)\n", WSAGetLastError(), attempts + 1);
-            attempts++;
-            Sleep(100); // Wait a bit before retrying
-        } else {
-            return 0; // Success
-        }
+// Global variable for the stop signal
+volatile int stopBuffering = 0;
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    // Register the window class.
+    const char CLASS_NAME[] = "Sample Window Class";
+
+    WNDCLASS wc = { };
+
+    wc.lpfnWndProc = WindowProc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = CLASS_NAME;
+
+    RegisterClass(&wc);
+
+    // Create the window.
+    HWND hwnd = CreateWindowEx(
+        0,                              // Optional window styles.
+        CLASS_NAME,                     // Window class
+        "Packet Buffering Application", // Window text
+        WS_OVERLAPPEDWINDOW,            // Window style
+
+        // Size and position
+        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+
+        NULL,       // Parent window    
+        NULL,       // Menu
+        hInstance,  // Instance handle
+        NULL        // Additional application data
+    );
+
+    if (hwnd == NULL) {
+        return 0;
     }
 
-    return -1; // Failed after max attempts
+    ShowWindow(hwnd, nCmdShow);
+
+    // Run the message loop.
+    MSG msg = { };
+    while (GetMessage(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+
+    return 0;
 }
 
-int main() {
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {
+    case WM_CREATE:
+        // Create a button to start buffering
+        CreateWindow(
+            "BUTTON",  // Predefined class; Unicode assumed 
+            "Start Buffering",      // Button text 
+            WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,  // Styles 
+            10,         // x position 
+            10,         // y position 
+            120,        // Button width
+            30,        // Button height
+            hwnd,       // Parent window
+            (HMENU) 1,       // ID
+            (HINSTANCE) GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
+            NULL);      // Pointer not needed
+
+        // Create a button to stop buffering
+        CreateWindow(
+            "BUTTON",  // Predefined class; Unicode assumed 
+            "Stop Buffering",      // Button text 
+            WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,  // Styles 
+            150,        // x position 
+            10,         // y position 
+            120,        // Button width
+            30,         // Button height
+            hwnd,       // Parent window
+            (HMENU) 2,       // ID
+            (HINSTANCE) GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
+            NULL);      // Pointer not needed
+
+        break;
+
+    case WM_COMMAND:
+        if (LOWORD(wParam) == 1) {
+            // Start the buffering thread
+            stopBuffering = 0;
+            CreateThread(NULL, 0, BufferingThread, NULL, 0, NULL);
+        } else if (LOWORD(wParam) == 2) {
+            // Signal to stop buffering
+            stopBuffering = 1;
+        }
+        break;
+
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        return 0;
+
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        // TODO: Add any drawing code that uses hdc here...
+        EndPaint(hwnd, &ps);
+    }
+                  return 0;
+    }
+
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+// Function for packet buffering (your C program logic)
+DWORD WINAPI BufferingThread(LPVOID lpParam) {
     WSADATA wsaData;
     SOCKET receiverSocket, senderSocket;
     struct sockaddr_in receiverAddr, decoderAddr;
@@ -98,7 +191,7 @@ int main() {
     printf("Server started. Receiver listening on port %d\n", RECEIVER_PORT);
 
     // Main loop to receive and forward packets
-    while (1) {
+    while (!stopBuffering) {
         struct sockaddr_in senderAddr;
         int senderAddrSize = sizeof(senderAddr);
         char buffer[BUFFER_SIZE];
@@ -147,9 +240,10 @@ int main() {
                 for (int i = 0; i < bufferIndex; i++) {
                     totalBufferSize += packetBuffer[i].size;
                 }
-                printf("Total size: %d bytes\n", totalBufferSize);
+                printf("Total size of buffered packets: %d bytes\n", totalBufferSize);
 
-                bufferingEndTime = clock(); // Record end time for buffering
+                // Measure the time taken to buffer packets
+                bufferingEndTime = clock();
                 double bufferingDuration = (double)(bufferingEndTime - bufferingStartTime) / CLOCKS_PER_SEC;
                 printf("Time taken to buffer packets: %.2f ms\n", bufferingDuration * 1000);
 
@@ -157,9 +251,9 @@ int main() {
 
                 // Send buffered packets
                 for (int i = 0; i < bufferIndex; i++) {
-                    result = sendPacketWithRetry(senderSocket, &decoderAddr, packetBuffer[i]);
-                    if (result == -1) {
-                        printf("Failed to send packet after multiple attempts\n");
+                    result = sendto(senderSocket, packetBuffer[i].data, packetBuffer[i].size, 0, (struct sockaddr *)&decoderAddr, sizeof(decoderAddr));
+                    if (result == SOCKET_ERROR) {
+                        printf("sendto() failed: %d\n", WSAGetLastError());
                     }
                     free(packetBuffer[i].data);
                 }

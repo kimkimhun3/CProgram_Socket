@@ -12,32 +12,13 @@
 #define DECODER_PORT 5004          // Port of the Decoder
 #define BUFFER_SIZE 65535          // Max size of a single UDP packet
 #define MAX_PACKETS 100000         // Maximum number of packets to buffer
-#define START_BUFFERING_TIME 2000  // 3 seconds for normal operation
-#define MAX_BUFFERED_PACKETS 1000  // Maximum number of packets to buffer before sending
-#define MAX_RETRY_ATTEMPTS 5       // Maximum number of retry attempts for sending a packet
+#define START_BUFFERING_TIME 3000  // 3 seconds
+#define BUFFERING_DURATION 500    // 2 seconds
 
 typedef struct {
     char *data;
     int size;
 } Packet;
-
-int sendPacketWithRetry(SOCKET senderSocket, const struct sockaddr_in *decoderAddr, Packet packet) {
-    int result;
-    int attempts = 0;
-
-    while (attempts < MAX_RETRY_ATTEMPTS) {
-        result = sendto(senderSocket, packet.data, packet.size, 0, (struct sockaddr *)decoderAddr, sizeof(*decoderAddr));
-        if (result == SOCKET_ERROR) {
-            printf("sendto() failed: %d. Retrying... (Attempt %d)\n", WSAGetLastError(), attempts + 1);
-            attempts++;
-            Sleep(100); // Wait a bit before retrying
-        } else {
-            return 0; // Success
-        }
-    }
-
-    return -1; // Failed after max attempts
-}
 
 int main() {
     WSADATA wsaData;
@@ -47,8 +28,10 @@ int main() {
     int bufferIndex = 0;
     int buffering = 0;
     int result;
-    clock_t startTime = clock();  // Track the start time for the initial normal operation
-    clock_t bufferingStartTime, bufferingEndTime; // Variables for buffering time measurement
+    clock_t startTime = clock();       // Track the start time for initial normal operation
+    clock_t lastBufferingTime = 0;     // Track the time of the last packet buffered
+    clock_t startSendingTime = 0;      // Track the time when packets start sending after buffering
+    clock_t startBufferingTime = 0;    // Track the time when packets start buffering
 
     // Initialize Winsock
     result = WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -96,8 +79,9 @@ int main() {
     decoderAddr.sin_addr.s_addr = inet_addr(DECODER_IP);
 
     printf("Server started. Receiver listening on port %d\n", RECEIVER_PORT);
-
+    // We did check the two times of packets sending and the time of the packets buffering to make sure that everything is working fine.
     // Main loop to receive and forward packets
+    //last but not least, we did checked the same thing that happen to 
     while (1) {
         struct sockaddr_in senderAddr;
         int senderAddrSize = sizeof(senderAddr);
@@ -110,7 +94,8 @@ int main() {
         }
 
         if (!buffering) {
-            // Forward packets directly to the decoder during normal operation
+            // Forward packets directly to the decoder during initial normal operation
+            // At this stage, there is no buffering or something, incoming packets are sending to Decoder.
             result = sendto(senderSocket, buffer, recvLen, 0, (struct sockaddr *)&decoderAddr, sizeof(decoderAddr));
             if (result == SOCKET_ERROR) {
                 printf("sendto() failed: %d\n", WSAGetLastError());
@@ -118,14 +103,16 @@ int main() {
 
             // Check if it's time to start buffering
             if (clock() - startTime >= START_BUFFERING_TIME * CLOCKS_PER_SEC / 1000) {
-                printf("Starting buffering period\n");
-                buffering = 1;  // Switch to buffering mode
-                bufferIndex = 0; // Reset buffer index
-                bufferingStartTime = clock(); // Record start time for buffering
+                printf("Starting 2-second buffering period\n");
+                buffering = 1;
+                startBufferingTime = clock();
+                startTime = clock();  // Reset start time for buffering duration
+                bufferIndex = 0;      // Reset buffer index
             }
         } else {
             // Buffer the incoming packets
             if (bufferIndex < MAX_PACKETS) {
+                
                 packetBuffer[bufferIndex].data = malloc(recvLen);
                 if (packetBuffer[bufferIndex].data == NULL) {
                     printf("malloc() failed\n");
@@ -134,48 +121,39 @@ int main() {
                 memcpy(packetBuffer[bufferIndex].data, buffer, recvLen);
                 packetBuffer[bufferIndex].size = recvLen;
                 bufferIndex++;
+                lastBufferingTime = clock(); // Record the time of the last packet buffered, it cool
             } else {
                 printf("Buffer overflow, discarding packet\n");
             }
 
-            // Check if the buffer has reached the specified number of packets
-            if (bufferIndex >= MAX_BUFFERED_PACKETS) {
-                printf("Buffered %d packets, sending now\n", bufferIndex);
-
-                // Calculate the total size of the buffered packets
-                int totalBufferSize = 0;
-                for (int i = 0; i < bufferIndex; i++) {
-                    totalBufferSize += packetBuffer[i].size;
-                }
-                printf("Total size: %d bytes\n", totalBufferSize);
-
-                bufferingEndTime = clock(); // Record end time for buffering
-                double bufferingDuration = (double)(bufferingEndTime - bufferingStartTime) / CLOCKS_PER_SEC;
-                printf("Time taken to buffer packets: %.2f ms\n", bufferingDuration * 1000);
-
-                clock_t sendStartTime = clock();
-
+            // Check if buffering duration is over
+            if (clock() - startTime >= BUFFERING_DURATION * CLOCKS_PER_SEC / 1000) {
+                double bufferingDuration = (double)(lastBufferingTime - startBufferingTime) / CLOCKS_PER_SEC;
+                printf("Buffering took: %.3f seconds\n", bufferingDuration);
+                // Print last buffering time
+                printf("Last buffering time: %.3f seconds\n", (double)(lastBufferingTime) / CLOCKS_PER_SEC);
+                printf("Sending buffered packets\n");
+                startSendingTime = clock(); // Record the start time for sending packets
+                printf("Start sending time: %.3f seconds\n", (double)(startSendingTime) / CLOCKS_PER_SEC);
+                //We printed the differences between the time that it start to send the packts and the last time of doing buffering the packets.
                 // Send buffered packets
-                for (int i = 0; i < bufferIndex; i++) {
-                    result = sendPacketWithRetry(senderSocket, &decoderAddr, packetBuffer[i]);
-                    if (result == -1) {
-                        printf("Failed to send packet after multiple attempts\n");
+                for (int i = 0; i < bufferIndex; i++) { //This is the place where we send the buffered packets to Decoder, before moving to the waitingstage
+                    result = sendto(senderSocket, packetBuffer[i].data, packetBuffer[i].size, 0, (struct sockaddr *)&decoderAddr, sizeof(decoderAddr));
+                    if (result == SOCKET_ERROR) {
+                        printf("sendto() failed: %d\n", WSAGetLastError());
                     }
                     free(packetBuffer[i].data);
                 }
 
-                // Measure the time taken to send buffered packets
-                clock_t sendEndTime = clock();
-                double sendDuration = (double)(sendEndTime - sendStartTime) / CLOCKS_PER_SEC;
-                printf("Time taken to send buffered packets: %.2f ms\n", sendDuration * 1000);
-
                 // Clear the buffer
                 bufferIndex = 0;
 
+
+
                 // Switch back to normal operation
                 buffering = 0;
-                startTime = clock();  // Reset start time for the next normal operation period
-                printf("---------------------------------------------\n");
+                startTime = clock();  // Reset start time for the next buffering period
+                printf("Switched to normal operation\n");
             }
         }
     }
@@ -186,3 +164,15 @@ int main() {
     WSACleanup();
     return 0;
 }
+
+//1. Receiving new packets during burst sending:
+// A socket is an endpoint for sending or receiving data across a computer networks.
+// This program run in a single-thread, blocking manner. This mean that while the program is busy sending the buffred packets in a burst,
+// it may not immediately process new incoming packets from Encoder. 
+// However, since the receiving socket(`receiverSocket`) is still open and bound, the OS networking stack will still continue to
+// receive packets on this sockets.
+//2. Where do the new packets staty?
+// The new incoming packets will stay in the OS's socket receive buffer, which is a temporary storage area managed by the OS.
+// Once the program finished sending the bufferd packets and return to the main loop, it will start processing the new packets that have
+// accumulated in the OS buffer.
+// If the program take too long to send the bufferd packaets, 
