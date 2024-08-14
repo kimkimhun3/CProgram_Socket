@@ -69,7 +69,7 @@ int main() {
         return 1;
     }
 
-    // Setup decoder address structure
+    // Setup decoder address structure //DONW
     memset(&decoderAddr, 0, sizeof(decoderAddr));
     decoderAddr.sin_family = AF_INET;
     decoderAddr.sin_port = htons(DECODER_PORT);
