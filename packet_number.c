@@ -15,6 +15,7 @@
 #define START_BUFFERING_TIME 2000  // 3 seconds for normal operation
 #define MAX_BUFFERED_PACKETS 2000   // Maximum number of packets to buffer before sending
 //gcc packet_time.c -o packet_time.exe -lws2_32
+// The way how we use -lws2_32 to build the C file
 typedef struct {
     char *data;
     int size;
