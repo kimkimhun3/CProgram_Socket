@@ -127,7 +127,7 @@ int main() {
                 // Start measuring time to send buffered packets
                 clock_t sendStartTime = clock();
                 
-                // Send buffered packets
+                // Send buffered packetss
                 for (int i = 0; i < bufferIndex; i++) {
                     result = sendto(senderSocket, packetBuffer[i].data, packetBuffer[i].size, 0, (struct sockaddr *)&decoderAddr, sizeof(decoderAddr));
                     if (result == SOCKET_ERROR) {
